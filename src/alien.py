@@ -1,6 +1,10 @@
 import pygame
+import sys
 from pygame.sprite import Sprite
 from pygame.surface import Surface
+
+from ship import Ship
+from bullet import Bullet
 
 from settings import Settings
 
