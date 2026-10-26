@@ -1,45 +1,190 @@
 import pygame
+import sys
 from pygame.sprite import Sprite
 from pygame.surface import Surface
+
+from ship import Ship
+from bullet import Bullet
+
 from settings import Settings
-from typing import Optional
 
 
 class Alien(Sprite):
-    """Gerencia os alienígenas."""
+    """Representa um alienígena da frota."""
 
-    def __init__(self, alien_invasion_screen: Surface, alien_invasion_settings: Settings) -> None:
-        """Inicializa o alienígena e define sua posição inicial."""
-        super().__init__()  # Chama o construtor da classe Sprite para garantir que a classe Alien seja inicializada corretamente como um sprite do Pygame
-        self.screen = alien_invasion_screen
-        self.settings = alien_invasion_settings
-
-        # Carrega a imagem do alienígena e obtém seu rect
+    def __init__(self, screen: Surface, settings: Settings) -> None:
+        super().__init__()
+        self.screen = screen
+        self.settings = settings
         self.image = pygame.image.load("../images/alien.bmp")
         self.rect = self.image.get_rect()
+        self.x = float(self.rect.x)
 
-        # Inicia cada novo alienígena próximo à parte superior esquerda da tela
-        self.rect.x = self.rect.width
-        self.rect.y = self.rect.height
-
-        self.x = float(
-            self.rect.x
-        )  # Armazena a posição horizontal do alienígena como um número de ponto flutuante para permitir movimentos suaves
-
-    def drawme(self):
-        """Desenha o alienígena em sua posição atual."""
-        self.screen.blit(self.image, self.rect)  # ('o que', 'onde')
+    def check_edges(self) -> bool:
+        screen_rect = self.screen.get_rect()
+        return self.rect.right >= screen_rect.right or self.rect.left <= 0
 
     def update(self) -> None:
-        self.x += (
-            self.settings.alien_speed * self.settings.fleet_direction
-        )  # Move o alienígena para a direita ou esquerda com base na direção da frota
-        self.rect.x = (
-            self.x
-        )  # Atualiza a posição do rect do alienígena com base na nova coordenada x
+        self.x += self.settings.alien_speed * self.settings.fleet_direction
+        self.rect.x = self.x
 
-    def check_edges(self) -> Optional[bool]:
-        """Retorna True se o alienígena estiver na borda da tela."""
-        screen_rect = self.screen.get_rect()
-        if self.rect.right >= screen_rect.right or self.rect.left <= 0:
-            return True
+
+class AlienInvasion:
+    """Gerencia o jogo e seus comportamentos."""
+
+    def __init__(self):
+        """Construtor da classe que inicializa o jogo e cria os recursos básicos"""
+        pygame.init()
+        self.settings = Settings()
+
+        self.screen = pygame.display.set_mode(
+            (self.settings.screen_width, self.settings.screen_height)
+        )
+        pygame.display.set_caption("Alien Invasion")
+
+        # Criando uma instância da classe Ship para representar a nave espacial
+        self.ship = Ship(self.screen, self.settings)
+
+        # Mudando a cor do plano de fundo em RGB
+        self.bg_color = self.settings.bg_color
+
+        self.bullets = (
+            pygame.sprite.Group()
+        ) # Cria um grupo para armazenar os projéteis disparados pela nave
+
+        self.aliens = (
+            pygame.sprite.Group()
+        ) # Cria um grupo para armazenar os alienígenas presentes no jogo
+    
+    def _check_events(self):
+        """Responde a eventos de pressionamento de teclas e mouse (fechamento da janela)"""
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                sys.exit()
+            elif event.type == pygame.KEYDOWN:
+                self._handle_keydown(event)
+            elif event.type == pygame.KEYUP:
+                self._handle_keyup(event)
+
+    def _handle_keydown(self, event: pygame.event.Event) -> None:
+        """Responde a eventos de pressionamento de teclas."""
+        if event.key == pygame.K_RIGHT:
+            self.ship.moving_right = True
+        elif event.key == pygame.K_LEFT:
+            self.ship.moving_left = True
+        elif event.key == pygame.K_SPACE:
+            self._fire_bullet()
+
+    def _handle_keyup(self, event: pygame.event.Event) -> None:
+        """Responde a eventos de soltura de teclas."""
+        if event.key == pygame.K_RIGHT:
+            self.ship.moving_right = False
+        elif event.key == pygame.K_LEFT:
+            self.ship.moving_left = False
+
+    def _fire_bullet(self) -> None:
+        """Dispara um projétil se o limite de projéteis ainda não tiver sido alcançado."""
+        if len(self.bullets) < self.settings.bullet_allowed:
+            new_bullet = Bullet(self.screen, self.settings, self.ship)
+            self.bullets.add(new_bullet)
+            
+    def _update_bullets(self) -> None:
+        """Atualiza a posição dos projéteis e se livra dos projéteis antigos."""
+        self.bullets.update()
+        self._remove_offscreen_bullets()
+        self._check_bullet_alien_collisions()
+
+    def _remove_offscreen_bullets(self) -> None:
+        """Remove os projéteis que desapareceram da tela."""
+        for bullet in self.bullets.copy():
+            if bullet.rect.bottom <= 0:
+                self.bullets.remove(bullet)
+
+    def _check_bullet_alien_collisions(self) -> None:
+        """Verifica colisões entre projéteis e alienígenas."""
+        pygame.sprite.groupcollide(self.bullets, self.aliens, True, True)
+
+    def _update_aliens(self) -> None:
+        """Verifica se a frota de alienígenas está em uma borda, então atualiza as posições de todos os alienígenas na frota."""
+        self._check_fleet_edges()
+        self.aliens.update()
+
+    def _check_fleet_edges(self) -> None:
+        """Responde apropriadamente se algum alienígena tiver alcançado uma borda."""
+        for alien in self.aliens.sprites():
+            if alien.check_edges():
+                self._change_fleet_direction()
+                break
+            
+    def _change_fleet_direction(self) -> None:
+        """Desce a frota e muda sua direção."""
+        for alien in self.aliens.sprites():
+            alien.rect.y += self.settings.fleet_drop_speed
+        self.settings.fleet_direction *= -1
+
+    def _check_ship_collision(self) -> None:
+        """Verifica se a nave colidiu com algum alienígena."""
+        if pygame.sprite.spritecollideany(self.ship, self.aliens):
+            print("A nave foi atingida!")
+            sys.exit()
+
+    def _render_screen(self) -> None:
+        """Redesenha a tela a cada passagem pelo laço."""
+        self.screen.fill(self.bg_color)
+        self.ship.blitme()
+        self.aliens.draw(self.screen)
+        self._draw_bullets()
+        pygame.display.flip()
+
+    def _draw_bullets(self) -> None:
+        """Desenha os projéteis na tela."""
+        for bullet in self.bullets.sprites():
+            bullet.draw_bullet()
+
+    def _update_game_state(self) -> None:
+        """Atualiza a posição da nave, dos projéteis e dos alienígenas."""
+        self.ship.update()
+        self._update_bullets()
+        self._update_aliens()
+        self._check_ship_collision()
+        
+    def create_fleet(self):
+        """Cria uma frota de alienígenas."""
+        # Cria um alienígena e calcula o número de alienígenas em uma linha
+        # O espaçamento entre os alienígenas é igual a um alienígena
+        alien = Alien(self.screen, self.settings)
+        alien_width = alien.rect.width
+        alien_height = alien.rect.height
+        available_space_x = self.settings.screen_width - (2 * alien_width)
+        number_aliens_x = available_space_x // (2 * alien_width)
+        ship_height = self.ship.rect.height
+        available_space_y = (
+            self.settings.screen_height - (3 * alien_height) - ship_height
+        )
+        number_rows = available_space_y // (2 * alien_height)
+
+        for row_number in range(number_rows):
+            # Cria a primeira linha de alienígenas
+            for alien_number in range(number_aliens_x):
+                # Cria um alienígena e o posiciona na linha
+                alien = Alien(self.screen, self.settings)
+                alien.x = alien_width + 2 * alien_width * alien_number
+                alien.rect.x = alien.x
+                alien.y = alien_height + 2 * alien_height * row_number
+                alien.rect.y = alien.y
+                self.aliens.add(alien)
+                
+    def run_game(self) -> None:
+        """Cria um laço de repetição para a tela sempre ficar visível até
+        que o usuário decida fechar a janela."""
+
+        self.create_fleet() # Cria a frota de alienígenas para ser desenhada na tela
+
+        while True:
+            self._check_events()
+            self._update_game_state()
+            self._render_screen()
+
+if __name__ == "__main__":
+    alien_invasion = AlienInvasion()
+    alien_invasion.run_game()
